@@ -65,5 +65,6 @@ export default {
     domain: process.env.MAILGUN_DOMAIN,
   },
 
-  quicknodeWs: process.env.QUICKNODE_WSS,
+  wsProviderUrl: process.env.WS_PROVIDER_URL,
+  httpProviderUrl: process.env.HTTP_PROVIDER_URL,
 };

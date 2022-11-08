@@ -4,6 +4,8 @@ import { Router } from 'express';
 // import agendash from './routes/agendash';
 import contract from './routes/contract';
 import db from './routes/db';
+import pair from './routes/pair';
+import token from './routes/token';
 
 // guaranteed to get dependencies
 export default () => {
@@ -12,6 +14,8 @@ export default () => {
   // user(app);
   // agendash(app);
   contract(app);
+  token(app);
+  pair(app);
   db(app);
 
   return app;

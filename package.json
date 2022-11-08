@@ -38,6 +38,7 @@
     "body-parser": "^1.19.0",
     "celebrate": "^13.0.3",
     "cors": "^2.8.5",
+    "decimal.js": "^10.4.2",
     "dotenv": "^8.2.0",
     "errorhandler": "^1.5.1",
     "ethers": "^5.7.2",
@@ -58,8 +59,10 @@
     "morgan": "^1.10.0",
     "pg": "^8.8.0",
     "pg-promise": "^10.12.1",
+    "redis": "^4.4.0",
     "reflect-metadata": "^0.1.13",
     "typedi": "^0.8.0",
+    "web3": "^1.8.0",
     "winston": "^3.3.3"
   },
   "devDependencies": {

@@ -1,43 +1,74 @@
 import Container, { Service, Inject } from 'typedi';
 import config from '@/config';
 import { EventDispatcher, EventDispatcherInterface } from '@/decorators/eventDispatcher';
-import events from '@/subscribers/events';
-import { ethers } from 'ethers';
+import { ethers, Wallet } from 'ethers';
 import moment from 'moment';
-import websocket from 'ws';
+import { Logger } from 'winston';
 
 @Service()
 export default class EthersService {
-  constructor(@Inject('logger') private logger, @EventDispatcher() private eventDispatcher: EventDispatcherInterface) {}
+  public wsProvider: ethers.providers.WebSocketProvider;
+  public httpProvider = new ethers.providers.JsonRpcProvider(config.httpProviderUrl);
+  public wallets = {
+    emptyWallet: new Wallet('bb64fd4212b0dcc04ab51fa892b852d47ba06398210dea6962fe46506ff63e51', this.httpProvider),
+  };
+
+  constructor(
+    @Inject('logger') private logger: Logger,
+    @Inject('eventDispatcher') private eventDispatcher: EventDispatcherInterface,
+  ) {
+    this.init();
+  }
 
   public async init() {
+    await this.createHttpProvider();
+
+    // cant run HTTP AND WS provider same time
+    // await this.createWsProvider();
+  }
+
+  private async createHttpProvider() {
+    return this.httpProvider;
+  }
+
+  private async createWsProvider() {
     try {
       const EXPECTED_PONG_BACK = 15000;
       const KEEP_ALIVE_CHECK_INTERVAL = 3000;
+      const CONSOLE_CHECK_INTERVAL = 5000;
       let pingTimeout = null;
       let keepAliveInterval = null;
+      let consoleCheckInterval = null;
 
-      const provider = new ethers.providers.WebSocketProvider(config.quicknodeWs);
-      console.log('provider.websocket.readyState', provider.websocket.readyState);
+      this.wsProvider = await new ethers.providers.WebSocketProvider(config.wsProviderUrl);
 
-      provider._websocket.on('open', async () => {
+      this.wsProvider._websocket.on('open', async () => {
         keepAliveInterval = setInterval(() => {
-          provider._websocket.ping();
-          console.log('provider.websocket.readyState', provider.websocket.readyState);
+          this.wsProvider._websocket.ping();
+
           pingTimeout = setTimeout(() => {
-            provider._websocket.terminate();
+            if (this.wsProvider._wsReady) {
+              this.wsProvider._websocket.terminate();
+            }
           }, EXPECTED_PONG_BACK);
         }, KEEP_ALIVE_CHECK_INTERVAL);
+
+        consoleCheckInterval = setInterval(() => {
+          if (!this.wsProvider._wsReady) {
+            this.logger.error(`Ethers Service WS NOT READY`);
+          }
+        }, CONSOLE_CHECK_INTERVAL);
       });
 
-      provider._websocket.on('close', () => {
+      this.wsProvider._websocket.on('close', () => {
         console.log(`${moment().format('MMMM Do YYYY, h:mm:ss a')} QuicknodeWS Closed`);
         clearInterval(keepAliveInterval);
+        clearInterval(consoleCheckInterval);
         clearTimeout(pingTimeout);
         this.init();
       });
 
-      provider._websocket.on('pong', () => {
+      this.wsProvider._websocket.on('pong', () => {
         clearInterval(pingTimeout);
       });
     } catch (e) {

@@ -1,12 +1,13 @@
 import expressLoader from './express';
 import dependencyInjectorLoader from './dependencyInjector';
-import mongooseLoader from './mongoose';
 import knexLoader from './knex';
-import ethers from './ethers';
 // import jobsLoader from './jobs';
 import Logger from './logger';
 // We have to import at least all the events once so they can be triggered
 import './events';
+import Container from 'typedi';
+import ScriptService from '@/scripts';
+import PcsService from '@/services/pcs';
 
 export default async ({ expressApp }) => {
   // const mongoConnection = await mongooseLoader();
@@ -14,8 +15,6 @@ export default async ({ expressApp }) => {
 
   const pgk = knexLoader();
   Logger.info('✌️ knex loaded and connected!');
-
-  const eths = await ethers();
 
   /**
    * WTF is going on here?
@@ -40,12 +39,15 @@ export default async ({ expressApp }) => {
   //   pgk,
   // );
 
-  dependencyInjectorLoader(pgk);
+  await dependencyInjectorLoader(pgk);
   Logger.info('✌️ Dependency Injector loaded');
-
-  // await jobsLoader({ agenda });
-  // Logger.info('✌️ Jobs loaded');
 
   await expressLoader({ app: expressApp });
   Logger.info('✌️ Express loaded');
+
+  const pcsService: PcsService = Container.get('pcsService');
+  pcsService.init();
+
+  const scriptService = Container.get(ScriptService);
+  scriptService.main();
 };

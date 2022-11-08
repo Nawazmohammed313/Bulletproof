@@ -1,3 +1,8 @@
+import { EventDispatcher } from '@/decorators/eventDispatcher';
+import ScriptService from '@/scripts';
+import EthersService from '@/services/ethers';
+import PcsService from '@/services/pcs';
+import eventDispatcher from 'event-dispatch';
 import { Container } from 'typedi';
 import LoggerInstance from './logger';
 
@@ -29,6 +34,17 @@ export default (pgk: NamespaceKnex.KnexTypes) => {
   try {
     Container.set('pgk', pgk);
     Container.set('logger', LoggerInstance);
+    Container.set('eventDispatcher', EventDispatcher);
+    Container.set('ethersService', new EthersService(Container.get('logger'), Container.get('eventDispatcher')));
+    Container.set(
+      'pcsService',
+      new PcsService(
+        Container.get('ethersService'),
+        Container.get('pgk'),
+        Container.get('logger'),
+        Container.get('eventDispatcher'),
+      ),
+    );
   } catch (e) {
     LoggerInstance.error('🔥 Error on dependency injector loader: %o', e);
     throw e;

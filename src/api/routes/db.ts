@@ -14,17 +14,21 @@ export default (app: Router) => {
   app.use(endpoint, route);
 
   route.post(
-    '/create-contract-table',
+    '/create-table',
     celebrate({
-      body: Joi.object({}),
+      body: Joi.object({ tableName: Joi.string().required() }),
     }),
     async (req: Request, res: Response, next: NextFunction) => {
       const logger: Logger = Container.get('logger');
       logger.debug(`POST ${endpoint}/ `, req.body);
       try {
         const dbServiceInstance = Container.get(DbService);
-        const contracts = await dbServiceInstance.createContractTable(req.body);
-        return res.status(200).json(contracts);
+        console.log(
+          'dbServiceInstance[`create${req.body.tableName}Table`]',
+          dbServiceInstance[`create${req.body.tableName}Table`],
+        );
+        const table = await dbServiceInstance[`create${req.body.tableName}Table`]();
+        return res.status(200).json(table);
       } catch (e) {
         logger.error('🔥 error: %o', e);
         return next(e);
@@ -33,16 +37,16 @@ export default (app: Router) => {
   );
 
   route.delete(
-    '/drop-contract-table',
+    '/drop-table',
     celebrate({
-      body: Joi.object({}),
+      body: Joi.object({ tableName: Joi.string().required() }),
     }),
     async (req: Request, res: Response, next: NextFunction) => {
       const logger: Logger = Container.get('logger');
       logger.debug(`DELETE ${endpoint}/ `, req.query);
       try {
         const dbServiceInstance = Container.get(DbService);
-        const contracts = await dbServiceInstance.dropContractTable(req.body);
+        const contracts = await dbServiceInstance.dropTable(req.body.tableName);
         return res.status(200).json(contracts);
       } catch (e) {
         logger.error('🔥 error: %o', e);
