@@ -1,7 +1,8 @@
 export interface IPair {
   addr: string;
-  token0Addr: string;
-  token1Addr: string;
+  tokenAddr: string;
+  lpAddr: string;
+  factoryAddr: string;
   createDate?: Date;
   createdAt?: Date;
   updatedAt?: Date;

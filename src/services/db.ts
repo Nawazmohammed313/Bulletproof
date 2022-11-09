@@ -33,9 +33,10 @@ export default class DbService {
   public async createPairTable() {
     try {
       const table = await this.pgk.schema.createTable('Pair', table => {
-        table.string('addr', 42).primary().unique();
-        table.string('token0Addr', 42).index('idx_token0Addr');
-        table.string('token1Addr', 42).index('idx_token1Addr');
+        table.string('addr', 42).notNullable().primary().unique();
+        table.string('tokenAddr', 42).notNullable().index('idx_tokenAddr');
+        table.string('lpAddr', 42).notNullable().index('idx_lpAddr');
+        table.string('factoryAddr', 42).index('idx_factoryAddr');
         table.date('createDate');
         table.timestamps(true, true, true);
       });
