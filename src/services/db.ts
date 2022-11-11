@@ -48,6 +48,41 @@ export default class DbService {
     }
   }
 
+  public async createSwapTable() {
+    try {
+      const table = await this.pgk.schema.createTable('Swap', table => {
+        table.primary(['blockNumber', 'logIdx']);
+        table.bigint('blockNumber').notNullable().index('idx_swap_blockNumber');
+        table.string('txHash', 80).notNullable().index('idx_swap_txHash');
+        table.bigint('logIdx').notNullable().index('idx_swap_logIdx');
+        table.string('pairAddr', 42).notNullable().index('idx_swap_pairAddr');
+        table.string('tokenAddr', 42).notNullable().index('idx_swap_tokenAddr');
+        table.string('lpAddr', 42).notNullable().index('idx_swap_lpAddr');
+        table.decimal('gasPrice', 24, 12).notNullable();
+        table.decimal('gasLimit', 24, 12).notNullable();
+        table.string('txFrom', 42).index('idx_swap_txFrom');
+        table.string('txTo', 42).index('idx_swap_txTo');
+        table.string('swapSender', 42).notNullable().index('idx_swap_swapSender');
+        table.string('swapTo', 42).notNullable().index('idx_swap_swapTo');
+        table.string('side', 4).notNullable().index('idx_swap_side');
+        table.decimal('lpReserveUsd', 84, 56).notNullable();
+        table.decimal('tokenInUsd', 84, 56).notNullable();
+        table.decimal('tokenOutUsd', 84, 56).notNullable();
+        table.decimal('lpInUsd', 84, 56).notNullable();
+        table.decimal('lpOutUsd', 84, 56).notNullable();
+        table.decimal('tokenPriceUsd', 84, 56).notNullable();
+        table.decimal('lpPriceUsd', 84, 56).notNullable();
+        table.bigint('timestamp').notNullable();
+        table.timestamps(true, true, true);
+      });
+
+      return table;
+    } catch (e) {
+      this.logger.error(e);
+      throw e;
+    }
+  }
+
   public async createLogTable() {
     try {
       const table = await this.pgk.schema.createTable('Log', table => {

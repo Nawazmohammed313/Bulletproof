@@ -2,23 +2,20 @@ import { Service, Inject } from 'typedi';
 import { EventDispatcher, EventDispatcherInterface } from '@/decorators/eventDispatcher';
 import { Logger } from 'winston';
 import EthersService from './ethers';
-import { BigNumber, Contract, ethers, utils } from 'ethers';
+import { BigNumber, Contract, ethers, Transaction, utils } from 'ethers';
 import { pcsPairAbi } from '../abis/pcsPairAbi';
-import { Interface } from 'ethers/lib/utils';
+import { formatUnits, Interface } from 'ethers/lib/utils';
 import { ILog } from '@/interfaces/ILog';
 import { IPair } from '@/interfaces/IPair';
 import { IToken } from '@/interfaces/IToken';
+import { ISwap } from '@/interfaces/ISwap';
 import genericTokenAbi from '@/abis/genericTokenAbi';
-
 import { pcsFactoryAbi } from '@/abis/pcsFactoryAbi';
-import { pcsRouterAbi } from '@/abis/pcsRouterAbi';
-
 import Decimal from 'decimal.js';
-import { setInterval } from 'timers';
 import { sleep } from '@/utils';
+import { IBlock } from '@/interfaces/IBlock';
 
 const safeErrors = { duplicate: 'duplicate key value violates unique constraint' };
-let updateWbnbInterval;
 
 @Service()
 export default class PcsService {
@@ -42,16 +39,14 @@ export default class PcsService {
   public usdtAddr: string = '0x55d398326f99059ff775485246999027b3197955';
   public usdcAddr: string = '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d';
 
-  public wbnbPriceUsd: number;
-
   public validLpLatestQuotesUsd = {
     [this.wbnbAddr]: null,
     [this.cakeAddr]: null,
     [this.btcAddr]: null,
     [this.ethAddr]: null,
-    [this.busdAddr]: 1,
-    [this.usdtAddr]: 1,
-    [this.usdcAddr]: 1,
+    [this.busdAddr]: new Decimal(1),
+    [this.usdtAddr]: new Decimal(1),
+    [this.usdcAddr]: new Decimal(1),
   };
 
   public validLpAddrs = {
@@ -75,7 +70,7 @@ export default class PcsService {
     @Inject('logger') private logger: Logger,
     @EventDispatcher() private eventDispatcher: EventDispatcherInterface,
   ) {
-    this.updateCurrentTokenToBusd = this.updateCurrentTokenToBusd.bind(this);
+    this.updateCurrentLpTokenToBusd = this.updateCurrentLpTokenToBusd.bind(this);
   }
 
   //! INIT
@@ -106,10 +101,11 @@ export default class PcsService {
   }
 
   private async updateLps() {
-    await this.updateCurrentTokenToBusd(this.wbnbAddr);
-    await this.updateCurrentTokenToBusd(this.cakeAddr);
-    await this.updateCurrentTokenToBusd(this.btcAddr);
-    await this.updateCurrentTokenToBusd(this.ethAddr);
+    await this.updateCurrentLpTokenToBusd(this.wbnbAddr);
+    await this.updateCurrentLpTokenToBusd(this.cakeAddr);
+    await this.updateCurrentLpTokenToBusd(this.btcAddr);
+    await this.updateCurrentLpTokenToBusd(this.ethAddr);
+    console.log(this.validLpLatestQuotesUsd);
   }
 
   private validLpLatestQuotesUsdArePopulated() {
@@ -123,13 +119,13 @@ export default class PcsService {
   }
 
   // //TODO needs to be more dynamic and done better
-  private async updateCurrentTokenToBusd(addr: string): Promise<void> {
-    const price = await this.getCurrentTokenToBusd(addr);
+  private async updateCurrentLpTokenToBusd(addr: string): Promise<void> {
+    const price = await this.getCurrentLpTokenToBusd(addr);
     this.validLpLatestQuotesUsd[addr] = price;
   }
 
   // //TODO needs to be more dynamic and done better
-  private async getCurrentTokenToBusd(addr: string): Promise<number> {
+  private async getCurrentLpTokenToBusd(addr: string): Promise<Decimal> {
     try {
       const tokenA = await this.getTokenByAddr(addr);
       const tokenB = await this.getTokenByAddr(this.busdAddr);
@@ -137,7 +133,7 @@ export default class PcsService {
       const reserves = await this.getReservesByPairAddr(pair.addr);
       const reserveRatios = this.getRatiosFromReserves(tokenA.decimals, tokenB.decimals, reserves);
       const tokenPositions = this.getTokenPositions(tokenA.addr, tokenB.addr);
-      return parseFloat(reserveRatios[tokenPositions[tokenA.addr]].toString());
+      return new Decimal(reserveRatios[tokenPositions[tokenA.addr]]);
     } catch (error) {
       console.log(error.message);
       console.log('getTokenPositions');
@@ -195,25 +191,37 @@ export default class PcsService {
     return log.topics[0] === this.swapEvent;
   }
 
-  private async isValidPcsSyncSwapSet(syncSwapSet: ILog[]) {
+  private async isValidPcsSyncSwapSet(sync, swap): Promise<boolean> {
     try {
-      const sync = syncSwapSet[0];
-      const swap = syncSwapSet[1];
-
-      if (!(sync?.blockNumber && swap?.blockNumber)) {
+      if (!sync || !swap) {
         return false;
       }
 
-      if (!(sync.transactionHash === swap.transactionHash)) {
+      if (sync.transactionHash !== swap.transactionHash) {
         return false;
       }
 
-      if (!(swap.logIndex === sync.logIndex + 1)) {
+      if (swap.logIndex !== sync.logIndex + 1) {
+        console.log('1', sync);
+        console.log('2', swap);
+        console.log('3', sync && swap);
+        console.log('4', !(sync && swap));
+        process.exit();
+
+        return false;
+      }
+
+      if (!(sync.address === swap.address)) {
         return false;
       }
 
       const pair = await this.getPairByAddr(swap.address);
-      if (!(pair && pair.factoryAddr === this.pcsFactoryAddr)) {
+
+      if (!pair) {
+        return false;
+      }
+
+      if (!(pair.factoryAddr === this.pcsFactoryAddr)) {
         return false;
       }
 
@@ -221,13 +229,13 @@ export default class PcsService {
     } catch (error) {
       console.log(error.message);
       console.log('isValidPcsSyncSwapSet');
-      console.log({ syncSwapSet });
+      console.log({ sync, swap });
       throw new Error(error.message);
     }
   }
 
   public isSync(log: ILog): boolean {
-    return log.topics[0] === this.syncEvent;
+    return log?.topics?.[0] === this.syncEvent;
   }
 
   public async parseCurrentSwaps() {
@@ -254,9 +262,17 @@ export default class PcsService {
 
   public async parseSwapsByBlockNumber(blockNumber: number) {
     try {
-      const logs = await this.getSyncSwapLogsByBlockNumber(blockNumber);
+      const block = await this.ethersService.httpProvider.getBlockWithTransactions(blockNumber);
+      const logs: ILog[] = await this.getSyncSwapLogsByBlockNumber(blockNumber);
       const syncSwapSets = await this.getSyncSwapSetsFromLogs(logs);
-      await this.parseSyncSwapSets(syncSwapSets);
+
+      const transactions: Transaction[] = block.transactions;
+      const transactionsByHash: { [txHash: string]: Transaction } = {};
+      for (let i = 0; i < transactions.length; i++) {
+        const transaction = transactions[i];
+        transactionsByHash[transaction.hash] = transaction;
+      }
+      await this.parseSwaps(syncSwapSets, block, transactionsByHash);
     } catch (error) {
       console.log(error.message);
       console.log('parseSwapsByBlockNumber');
@@ -268,24 +284,29 @@ export default class PcsService {
   public async getSyncSwapSetsFromLogs(logs: ILog[]): Promise<ILog[][]> {
     try {
       const syncSwapSets: ILog[][] = [];
-      let syncSwapSet: ILog[] = [];
-      for (let i = 0; i < logs.length - 1; i++) {
+      let sync: any;
+      let swap: any;
+
+      for (let i = 0; i < logs.filter(log => log.removed === false).length - 1; i++) {
         try {
           const log: ILog = logs[i];
 
           if (this.isSync(log)) {
-            syncSwapSet[0] = log;
+            sync = log;
           } else if (this.isSwap(log)) {
-            syncSwapSet[1] = log;
+            swap = log;
 
-            if (this.isValidPcsSyncSwapSet(syncSwapSet)) {
-              syncSwapSets.push(syncSwapSet);
+            const isValid = await this.isValidPcsSyncSwapSet(sync, swap);
+            if (isValid) {
+              syncSwapSets.push([sync, swap]);
             }
 
-            syncSwapSet = [];
+            sync = undefined;
+            swap = undefined;
           }
         } catch (error) {
-          syncSwapSet = [];
+          sync = undefined;
+          swap = undefined;
           console.log(error.message);
         }
       }
@@ -299,23 +320,135 @@ export default class PcsService {
     }
   }
 
-  public async parseSyncSwapSets(syncSwapSets: ILog[][]) {
+  public async parseSwaps(
+    syncSwapSets: ILog[][],
+    block: IBlock,
+    transactionsByHash: { [txHash: string]: Transaction },
+  ) {
     for (let i = 0; i < syncSwapSets.length; i++) {
       const [sync, swap] = syncSwapSets[i];
-      await this.parseSyncSwapSet([sync, swap]);
+      const transaction = transactionsByHash[swap.transactionHash];
+      await this.parseSwap([sync, swap], block, transaction);
     }
   }
 
-  public async parseSyncSwapSet(syncSwapSet: ILog[]) {
+  public async parseSwap(syncSwapSet: ILog[], block: IBlock, transaction: Transaction) {
     try {
       const [sync, swap] = syncSwapSet;
+      const parsedSync = this.pairInterface.parseLog(sync);
+      const parsedSwap = this.pairInterface.parseLog(swap);
 
-      // const parsedSync = this.pairInterface.parseLog(sync);
-      // const parsedswap = this.pairInterface.parseLog(swap);
+      const pairAddr = swap.address;
+      const pair = await this.getPairByAddr(pairAddr);
+      if (!pair) {
+        return null;
+      }
+
+      const token = await this.getTokenByAddr(pair.tokenAddr);
+      const lpToken = await this.getTokenByAddr(pair.lpAddr);
+      if (!(token && lpToken)) {
+        return null;
+      }
+
+      const tokenPositions = this.getTokenPositions(token.addr, lpToken.addr);
+      const tokenPostion = tokenPositions[token.addr];
+      const lpPosition = tokenPositions[lpToken.addr];
+
+      const tokenReserveDecimal = new Decimal(formatUnits(parsedSync.args[tokenPostion], token.decimals));
+      const lpReserveDecimal = new Decimal(formatUnits(parsedSync.args[lpPosition], lpToken.decimals));
+
+      const tokenPriceUsd = lpReserveDecimal.div(tokenReserveDecimal).times(this.validLpLatestQuotesUsd[lpToken.addr]);
+      const lpPriceUsd = new Decimal(this.validLpLatestQuotesUsd[lpToken.addr]);
+
+      const lpReserveUsd = lpReserveDecimal.times(lpPriceUsd);
+
+      const amounts = {
+        amountIn0: parsedSwap.args[1],
+        amountIn1: parsedSwap.args[2],
+        amountOut0: parsedSwap.args[3],
+        amountOut1: parsedSwap.args[4],
+      };
+
+      const txFrom = transaction.from.toLowerCase();
+      const txTo = transaction.to?.toLowerCase() || null;
+      const gasPrice = new Decimal(formatUnits(transaction.gasPrice, 'gwei'));
+      const gasLimit = new Decimal(formatUnits(transaction.gasLimit, 'gwei'));
+      const swapSender: string = parsedSwap.args[0].toLowerCase();
+      const swapTo: string = parsedSwap.args[5].toLowerCase();
+
+      const tokenAmountIn: BigNumber = amounts[`amountIn${tokenPostion}`];
+      const tokenAmountOut: BigNumber = amounts[`amountOut${tokenPostion}`];
+      const lpAmountIn: BigNumber = amounts[`amountIn${lpPosition}`];
+      const lpAmountOut: BigNumber = amounts[`amountOut${lpPosition}`];
+
+      let side: string;
+      let amountInUsd: Decimal;
+      let amountOutUsd: Decimal;
+      if (lpAmountOut.isZero()) {
+        side = 'BUY';
+        amountInUsd = new Decimal(formatUnits(tokenAmountIn, token.decimals)).times(tokenPriceUsd);
+        amountOutUsd = new Decimal(formatUnits(lpAmountOut, lpToken.decimals)).times(lpPriceUsd);
+      } else if (tokenAmountOut.isZero()) {
+        side = 'SELL';
+        amountInUsd = new Decimal(formatUnits(lpAmountIn, lpToken.decimals)).times(lpPriceUsd);
+        amountOutUsd = new Decimal(formatUnits(tokenAmountOut, token.decimals)).times(tokenPriceUsd);
+      }
+
+      const tokenInUsd = new Decimal(formatUnits(tokenAmountIn, token.decimals)).times(tokenPriceUsd);
+      const tokenOutUsd = new Decimal(formatUnits(tokenAmountOut, token.decimals)).times(tokenPriceUsd);
+      const lpInUsd = new Decimal(formatUnits(lpAmountIn, lpToken.decimals)).times(lpPriceUsd);
+      const lpOutUsd = new Decimal(formatUnits(lpAmountOut, lpToken.decimals)).times(lpPriceUsd);
+
+      if (lpOutUsd.isZero()) {
+        side = 'BUY';
+      } else {
+        side = 'SELL';
+      }
+
+      const enrichedSwap: ISwap = {
+        blockNumber: block.number,
+        txHash: swap.transactionHash,
+        logIdx: swap.logIndex,
+
+        pairAddr: pair.addr,
+        tokenAddr: token.addr,
+        lpAddr: lpToken.addr,
+
+        gasPrice: parseFloat(gasPrice.toString()),
+        gasLimit: parseFloat(gasLimit.toString()),
+
+        txFrom: txFrom,
+        txTo: txTo,
+        swapSender: swapSender,
+        swapTo: swapTo,
+
+        side: side,
+
+        lpReserveUsd: parseFloat(lpReserveUsd.toString()),
+
+        tokenInUsd: parseFloat(tokenInUsd.toString()),
+        tokenOutUsd: parseFloat(tokenOutUsd.toString()),
+        lpInUsd: parseFloat(lpInUsd.toString()),
+        lpOutUsd: parseFloat(lpOutUsd.toString()),
+
+        tokenPriceUsd: parseFloat(tokenPriceUsd.toString()),
+        lpPriceUsd: parseFloat(lpPriceUsd.toString()),
+
+        timestamp: block.timestamp,
+      };
+
+      try {
+        await this.pgk('Swap').insert(enrichedSwap).returning('side');
+      } catch (error) {
+        if (!error.message.includes(safeErrors.duplicate)) {
+          console.error(error.message);
+          throw new Error(error.message);
+        }
+      }
     } catch (error) {
       console.log(error.message);
-      console.log('parseSyncSwapSets');
-      console.log({ syncSwapSet });
+      console.log('parseSwap');
+      console.dir({ syncSwapSet, transaction }, { depth: 5 });
       throw new Error(error.message);
     }
   }
@@ -338,7 +471,7 @@ export default class PcsService {
     }
   }
 
-  public async getPairByAddr(addr: string): Promise<IPair> {
+  public async getPairByAddr(addr: string): Promise<IPair | undefined> {
     try {
       const lowercasedAddr = addr.toLowerCase();
       if (this.pairs[lowercasedAddr]) {
@@ -348,7 +481,6 @@ export default class PcsService {
         if (pairContract.factory) {
           try {
             const factoryAddr = (await pairContract.factory()).toLowerCase();
-
             const token0Addr = (await pairContract.token0()).toLowerCase();
             const token1Addr = (await pairContract.token1()).toLowerCase();
 
